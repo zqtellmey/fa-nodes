@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-FalixNodes 自动续期脚本 - 增强容错版
-集成 CF 验证、GitHub Secrets 变量、TG 通知及弹窗强制穿透逻辑
+FalixNodes 自动续期脚本 - 终极修复版
+新增：处理欧盟 GDPR 隐私询问弹窗
 """
 
 import os, sys, time, platform, requests, threading
@@ -43,9 +43,28 @@ def notify(ok: bool, stage: str, msg: str = "", img: str = None):
         if img and Path(img).exists():
             with open(img, "rb") as f:
                 requests.post(f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendPhoto", 
-                              data={"chat_id": TG_CHAT_ID}, files={"photo": f}, timeout=15)
-    except Exception as e:
-        print(f"[ERROR] 通知发送失败: {e}")
+                              data={"chat_id": chat}, files={"photo": f}, timeout=15)
+    except: pass
+
+def handle_privacy_modal(sb):
+    """处理欧盟隐私询问弹窗 (GDPR)"""
+    try:
+        # 常见选择器：按钮文本通常包含 "Accept all"
+        selectors = [
+            "button.fc-cta-consent", 
+            "button:contains('Accept all')", 
+            ".fc-consent-root .fc-primary-button"
+        ]
+        time.sleep(2)
+        for selector in selectors:
+            if sb.is_element_visible(selector):
+                print(f"[INFO] 检测到隐私询问弹窗，正在点击同意...")
+                sb.click(selector)
+                time.sleep(2)
+                return True
+    except:
+        pass
+    return False
 
 def handle_turnstile(sb):
     """处理 Cloudflare Turnstile 验证"""
@@ -61,53 +80,53 @@ def handle_turnstile(sb):
 
 def main():
     if not SERVER_IP:
-        print("[ERROR] 未发现 FALIX_SERVER_IP 变量，请检查 GitHub Secrets 配置")
+        print("[ERROR] 未发现 FALIX_SERVER_IP 变量")
         sys.exit(1)
 
-    # 启动虚拟显示 (Linux 环境)
     display = None
     if platform.system().lower() == "linux" and not os.environ.get("DISPLAY"):
-        try:
-            from pyvirtualdisplay import Display
-            display = Display(visible=False, size=(1920, 1080))
-            display.start()
-            print("[INFO] 虚拟显示已启动")
-        except Exception as e:
-            print(f"[ERROR] 虚拟显示启动失败: {e}")
+        from pyvirtualdisplay import Display
+        display = Display(visible=False, size=(1920, 1080))
+        display.start()
 
     opts = {
         "uc": True,
         "test": True,
-        "locale": "zh",
+        "locale": "en", # 欧洲 IP 建议用英文环境减少冲突
         "headed": False,
         "incognito": True,
-        "timeout_multiplier": 1.5  # 整体放慢节奏，适应服务器环境
+        "timeout_multiplier": 1.5
     }
     if PROXY_SOCKS5: opts["proxy"] = PROXY_SOCKS5
 
     try:
         with SB(**opts) as sb:
             sb.set_window_size(1920, 1080)
-            print(f"[INFO] 开始续期任务，目标 IP: {SERVER_IP}")
+            print(f"[INFO] 开始任务: {SERVER_IP}")
             sb.uc_open_with_reconnect(TARGET_URL, reconnect_time=8.0)
+            
+            # --- 增加：处理隐私弹窗 ---
+            handle_privacy_modal(sb)
             
             # --- 第一阶段：通过 CF 验证 ---
             success_cf = False
             for i in range(1, 4):
                 handle_turnstile(sb)
                 try:
+                    # 如果 IP 输入框出现了，说明通过了
                     sb.wait_for_element_present("#IP", timeout=12)
                     success_cf = True
                     break
                 except:
-                    print(f"[WARN] 尝试 {i}: 验证未完成，刷新页面...")
+                    print(f"[WARN] 尝试 {i}: 页面未就绪，刷新并重试隐私处理...")
                     sb.refresh()
-                    time.sleep(5)
+                    time.sleep(3)
+                    handle_privacy_modal(sb)
             
             if not success_cf:
-                p = shot("cf_failed")
+                p = shot("stage1_failed")
                 sb.save_screenshot(p)
-                notify(False, "验证失败", "Cloudflare 验证多次尝试未通过", p)
+                notify(False, "验证失败", "无法越过隐私弹窗或 CF 验证", p)
                 return
 
             # --- 第二阶段：填写并点击启动 ---
@@ -117,54 +136,45 @@ def main():
             
             print(f"[INFO] 点击第一个启动按钮...")
             btn_1 = 'button.btn-start'
-            sb.scroll_to(btn_1) # 滚动到可见区域
+            sb.scroll_to(btn_1)
             sb.click(btn_1)
             
-            # --- 第三阶段：处理弹窗按钮 ---
-            print(f"[INFO] 等待弹窗确认按钮出现...")
-            time.sleep(5) # 强制给弹窗一点加载时间
+            # --- 第三阶段：处理二次确认弹窗 ---
+            print(f"[INFO] 等待 watchAdBtn 确认按钮...")
+            time.sleep(5)
             
             success_btn2 = False
-            # 尝试多种选择器和点击方式
             try:
-                # 增加等待时间到 25 秒
+                # 针对该特定按钮增加显式等待
                 sb.wait_for_element_visible("#watchAdBtn", timeout=25)
-                # 使用 JS 强制点击，防止被透明层、广告或其他元素遮挡
+                # 使用 JS 穿透点击，不受隐私残余遮罩影响
                 sb.execute_script('document.getElementById("watchAdBtn").click();')
                 success_btn2 = True
-                print("[INFO] 已通过 JS 触发确认按钮点击")
             except:
-                # 备选方案：通过 XPath 文本匹配
+                # 尝试点击任何包含“启动”字样的按钮作为保底
                 try:
-                    xpath_btn = "//button[contains(., '启动')]"
-                    if sb.is_element_visible(xpath_btn):
-                        sb.click(xpath_btn)
-                        success_btn2 = True
-                        print("[INFO] 已通过 XPath 触发确认按钮点击")
-                except:
-                    pass
+                    sb.execute_script('document.querySelector("button.btn-watch").click();')
+                    success_btn2 = True
+                except: pass
 
             if success_btn2:
-                print("✅ 续期指令已成功发送")
-                time.sleep(8) # 等待几秒确认页面状态
+                print("✅ 指令发送成功")
+                time.sleep(8)
                 p = shot("success")
                 sb.save_screenshot(p)
-                notify(True, "续期成功", f"服务器 {SERVER_IP} 启动指令已成功下达", p)
+                notify(True, "续期成功", f"服务器 {SERVER_IP} 已启动", p)
             else:
-                print("❌ 弹窗按钮超时未见")
                 p = shot("popup_failed")
                 sb.save_screenshot(p)
-                notify(False, "弹窗失败", "第一步点击后，未在 25s 内检测到确认启动按钮", p)
+                notify(False, "确认失败", "未能点击到弹窗内的确认按钮", p)
 
     except Exception as e:
-        print(f"[FATAL] 脚本崩溃: {e}")
+        print(f"[FATAL] 异常: {e}")
         notify(False, "脚本崩溃", str(e))
     finally:
         if display: display.stop()
-        print("[INFO] 脚本运行结束")
         os._exit(0)
 
 if __name__ == "__main__":
-    # 5分钟强制看门狗
     threading.Timer(300, lambda: os._exit(0)).start()
     main()
