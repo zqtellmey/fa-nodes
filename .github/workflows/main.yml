@@ -1,50 +1,47 @@
-name: Fa-Nodes
+name: FalixNodes Auto Renew
 
 on:
-  workflow_dispatch: # 允许手动触发
-  schedule:
-    # 每 6 小时运行一次 (国际标准时间 UTC)
-    # 06:00, 12:00, 18:00, 00:00 HKT
-   # - cron: '0 */6 * * *'
+  workflow_dispatch: # 支持手动点击运行
+ # schedule:
+    # 按照香港时间(HKT)每6小时运行一次
+    # 对应 HKT: 02:00, 08:00, 14:00, 20:00
+ #   - cron: '0 18,0,6,12 * * *'
 
 jobs:
-  renew:
+  renew_job:
     runs-on: ubuntu-latest
-
+    
     steps:
-      - name: Checkout Code
+      - name: 检出代码
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: 配置 Python 环境
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Install Dependencies
+      - name: 安装系统依赖
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb
-          pip install seleniumbase requests pyvirtualdisplay
-
-      - name: Install Browser
+          sudo apt-get install -y xvfb libosmesa6 libgl1-mesa-glx
+          
+      - name: 安装 Python 依赖
         run: |
-          # 安装 undetected-chromedriver 所需的浏览器环境
+          pip install seleniumbase requests pyvirtualdisplay
+          # 确保安装内置浏览器驱动
           sbase install chromedriver
 
-      - name: Run Renew Script
+      - name: 执行续期并发送截图到TG
         env:
-          # 在 GitHub Repo -> Settings -> Secrets and variables -> Actions 中设置以下变量
+          # 必须在仓库 Settings -> Secrets -> Actions 中添加这两个变量
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-          # 如果需要代理，取消下面注释并添加 Secret
+          # 如果有代理需求，请添加下行
           # PROXY_SOCKS5: ${{ secrets.PROXY_SOCKS5 }}
         run: |
-          # 启动虚拟显示并运行脚本
           python main.py
 
-      - name: Upload Screenshots
-        if: always() # 无论成功失败都上传截图，方便调试
-        uses: actions/upload-artifact@v4
-        with:
-          name: screenshots
-          path: output/screenshots/
+      - name: 清理临时文件
+        if: always()
+        run: |
+          rm -rf output/screenshots/*.png
