@@ -1,11 +1,11 @@
-name: Fa-Nodes
+name: FalixNodes Auto Renew
 
 on:
   workflow_dispatch: # 支持手动点击运行
-#  schedule:
+  schedule:
     # 按照香港时间 (HKT) 每 6 小时运行一次
     # 对应 UTC: 18:00, 00:00, 06:00, 12:00
- #   - cron: '0 18,0,6,12 * * *'
+    - cron: '0 18,0,6,12 * * *'
 
 jobs:
   renew_job:
@@ -23,8 +23,10 @@ jobs:
       - name: 安装系统依赖
         run: |
           sudo apt-get update
-          # 针对 Ubuntu 24.04+ 修复 GLX 依赖问题
-          # 使用 libgl1, libglx-mesa0 代替已弃用的 libgl1-mesa-glx
+          # 针对 Ubuntu 24.04 深度优化
+          # 1. 使用 libasound2t64 代替 libasound2
+          # 2. 移除已不存在的 libgconf-2-4
+          # 3. 使用 libgl1, libglx-mesa0 解决渲染问题
           sudo apt-get install -y \
             xvfb \
             libgl1 \
@@ -32,39 +34,36 @@ jobs:
             libegl1 \
             libxrender1 \
             libxcomposite1 \
-            libasound2 \
+            libasound2t64 \
             libxslt1.1 \
-            libgconf-2-4 \
-            libosmesa6
+            libosmesa6 \
+            libnss3 \
+            libnspr4 \
+            libatk1.0-0 \
+            libatk-bridge2.0-0 \
+            libcups2 \
+            libdrm2 \
+            libxkbcommon0 \
+            libxrandr2 \
+            libgbm1
 
       - name: 安装 Python 依赖
         run: |
           python -m pip install --upgrade pip
           pip install seleniumbase requests pyvirtualdisplay
-          # 安装 undetected-chromedriver 所需的浏览器驱动
+          # 安装浏览器驱动
           sbase install chromedriver
 
       - name: 执行续期并发送截图到 TG
         env:
-          # 请确保在 GitHub Settings -> Secrets -> Actions 中配置了以下两个变量
+          # 请确保在 GitHub Settings -> Secrets -> Actions 中配置了以下变量
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-          # 如需使用代理，请取消下方注释
-          # PROXY_SOCKS5: ${{ secrets.PROXY_SOCKS5 }}
         run: |
-          # 确保 output 目录存在，防止脚本保存截图时报错
           mkdir -p output/screenshots
           python main.py
-
-      - name: 上传执行日志 (仅在失败时)
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: error-logs
-          path: output/screenshots/
 
       - name: 清理环境
         if: always()
         run: |
-          # 运行结束清理，保护隐私
           rm -rf output/screenshots/*.png
