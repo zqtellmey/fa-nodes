@@ -4,6 +4,9 @@ on:
   workflow_dispatch:
 #  schedule:
 #    - cron: '0 18,0,6,12 * * *'
+concurrency:
+  group: mc-startup
+  cancel-in-progress: true
 
 jobs:
   renew:
