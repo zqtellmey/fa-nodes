@@ -1,7 +1,7 @@
 name: FalixNodes Auto Renew
 
 on:
-  workflow_dispatch: # 支持手动点击运行
+  workflow_dispatch: # 支持手动点击按钮运行
   schedule:
     # 按照香港时间 (HKT) 每 6 小时运行一次
     # 对应 UTC: 18:00, 00:00, 06:00, 12:00
@@ -23,10 +23,7 @@ jobs:
       - name: 安装系统依赖
         run: |
           sudo apt-get update
-          # 针对 Ubuntu 24.04 深度优化
-          # 1. 使用 libasound2t64 代替 libasound2
-          # 2. 移除已不存在的 libgconf-2-4
-          # 3. 使用 libgl1, libglx-mesa0 解决渲染问题
+          # 针对 Ubuntu 24.04 深度优化的依赖包组合
           sudo apt-get install -y \
             xvfb \
             libgl1 \
@@ -51,7 +48,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install seleniumbase requests pyvirtualdisplay
-          # 安装浏览器驱动
+          # 自动安装匹配的浏览器驱动
           sbase install chromedriver
 
       - name: 安装并启动代理 (全自动适配内核)
@@ -169,14 +166,21 @@ jobs:
 
       - name: 执行续期并发送截图到 TG
         env:
-          # 请确保在 GitHub Settings -> Secrets -> Actions 中配置了以下变量
+          # --- 从 GitHub Secrets 读取变量并注入到脚本环境变量 ---
+          # 请确保在仓库 Settings -> Secrets -> Actions 中配置了以下三个变量
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          FALIX_SERVER_IP: ${{ secrets.FALIX_SERVER_IP }}
+          # 如果你有代理 Secret，可以取消下行注释
+          # PROXY_SOCKS5: ${{ secrets.PROXY_SOCKS5 }}
         run: |
+          # 预先创建截图目录防止脚本报错
           mkdir -p output/screenshots
+          # 运行主脚本
           python main.py
 
-      - name: 清理环境
+      - name: 清理执行环境
         if: always()
         run: |
+          # 删除临时生成的截图文件以保护隐私
           rm -rf output/screenshots/*.png
