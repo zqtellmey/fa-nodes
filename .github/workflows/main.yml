@@ -1,0 +1,50 @@
+name: Fa-Nodes
+
+on:
+  workflow_dispatch: # 允许手动触发
+  schedule:
+    # 每 6 小时运行一次 (国际标准时间 UTC)
+    # 06:00, 12:00, 18:00, 00:00 HKT
+   # - cron: '0 */6 * * *'
+
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+          pip install seleniumbase requests pyvirtualdisplay
+
+      - name: Install Browser
+        run: |
+          # 安装 undetected-chromedriver 所需的浏览器环境
+          sbase install chromedriver
+
+      - name: Run Renew Script
+        env:
+          # 在 GitHub Repo -> Settings -> Secrets and variables -> Actions 中设置以下变量
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          # 如果需要代理，取消下面注释并添加 Secret
+          # PROXY_SOCKS5: ${{ secrets.PROXY_SOCKS5 }}
+        run: |
+          # 启动虚拟显示并运行脚本
+          python main.py
+
+      - name: Upload Screenshots
+        if: always() # 无论成功失败都上传截图，方便调试
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: output/screenshots/
