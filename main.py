@@ -6,7 +6,7 @@ from seleniumbase import SB
 # --- 1. 配置加载 ---
 TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN")
 TG_CHAT_ID = os.environ.get("TG_CHAT_ID")
-# 优先获取手动输入的 IP
+# 自动获取或手动设置 IP
 SERVER_IP = os.environ.get("FALIX_SERVER_IP") or "yaho.falixsrv.me"
 
 TARGET_URL = "https://falixnodes.net/startserver"
@@ -37,46 +37,55 @@ def main():
         display = Display(visible=False, size=(1920, 1080))
         display.start()
 
-    # uc=True 模式会自动处理 Cookies 和复杂的浏览器指纹
     with SB(uc=True, headed=False, locale="en", incognito=True) as sb:
         try:
             sb.set_window_size(1920, 1080)
-            print(f"[INFO] 任务启动，目标 IP: {SERVER_IP}")
+            print(f"[INFO] 任务启动，IP: {SERVER_IP}")
             
-            # 1. 打开页面并获取会话状态 (Cookies/Referer 基础)
+            # 步骤 1: 打开网站
             sb.uc_open_with_reconnect(TARGET_URL, reconnect_time=5.0)
-            
-            # 2. 处理验证码 (使用你指定的坐标 835, 583)
             time.sleep(3)
-            if sb.is_element_present('input[name="cf-turnstile-response"]'):
-                print(f"[INFO] 点击验证码坐标...")
-                sb.click_with_offset("body", 835, 583)
-                time.sleep(5)
-
-            # 3. 激活广告逻辑 (必须先点这个，后端才会允许 POST)
-            sb.wait_for_element_visible("#watchAdBtn", timeout=20)
-            sb.execute_script('document.getElementById("watchAdBtn").click();')
-            print("[INFO] 广告按钮已点击，等待 40 秒模拟播放...")
             
-            for i in range(1, 5):
-                time.sleep(10)
-                print(f"Waiting... {i*10}s")
+            # 步骤 2: 输入要启动的服务器地址
+            sb.wait_for_element_present("#IP", timeout=15)
+            sb.type("#IP", SERVER_IP)
+            print(f"[INFO] 已输入 IP: {SERVER_IP}")
 
-            # 4. 核心：高度模拟抓包数据的 Fetch POST
-            # 浏览器会自动补全：referer, origin, cookie, user-agent, sec-ch-ua 等
-            print(f"[INFO] 正在以相同 Referer 模拟 POST 启动服务器...")
+            # 步骤 3: 打上 CF 的验证勾
+            # SeleniumBase UC 模式会自动处理简单的 CF 验证
+            # 如果存在显式的验证框，尝试点击它
+            if sb.is_element_visible('input[name="cf-turnstile-response"]'):
+                print("[INFO] 正在处理 CF 验证勾...")
+                sb.uc_gui_click_captcha()
+                time.sleep(4)
+
+            # 步骤 4: 点击第一个按钮 (Start Server)
+            # 根据页面逻辑，通常先点这个才会弹出 watchAdBtn
+            sb.click('button.btn-start') 
+            print("[INFO] 已点击第一个按钮 (Start Server)")
+            time.sleep(3)
+
+            # 步骤 5: 点击第二个按钮 (watchAdBtn)
+            sb.wait_for_element_visible("#watchAdBtn", timeout=15)
+            sb.execute_script('document.getElementById("watchAdBtn").click();')
+            print("[INFO] 已点击第二个按钮 (watchAdBtn)，广告计时开始...")
+
+            # 步骤 6: 等广告看完 (模拟等待 45 秒)
+            for i in range(1, 6):
+                time.sleep(9)
+                print(f"广告进度模拟: {i*20}%...")
+
+            # 步骤 7: POST 这个 START 的请求
+            # 此时后端已经记录了该 Session 完成了看广告动作
+            print("[INFO] 广告模拟结束，正在发送最终 POST 请求...")
             post_script = f"""
             fetch('/startserver', {{
                 method: 'POST',
                 headers: {{
                     'Content-Type': 'application/x-www-form-urlencoded',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-                    'Cache-Control': 'max-age=0'
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7'
                 }},
                 body: 'IP={SERVER_IP}&cf-turnstile-response=',
-                referrer: '{TARGET_URL}',
-                referrerPolicy: 'strict-origin-when-cross-origin',
-                mode: 'cors',
                 credentials: 'include'
             }}).then(response => {{
                 if (response.redirected) {{
@@ -84,28 +93,28 @@ def main():
                 }} else {{
                     location.reload();
                 }}
-            }}).catch(err => {{
-                console.error('Fetch Error:', err);
             }});
             """
             sb.execute_script(post_script)
             
-            # 5. 等待跳转刷新
+            # 等待刷新并判定
             time.sleep(10)
             
-            # 6. 判定最终结果
             if sb.is_element_visible('#success-alert'):
                 msg = sb.get_text("#success-msg")
-                p_ok = str(OUTPUT_DIR / "final_success.png")
+                p_ok = str(OUTPUT_DIR / "flow_success.png")
                 sb.save_screenshot(p_ok)
-                notify(True, f"通过模拟 POST 成功开启: {msg}", p_ok)
+                notify(True, f"完整流程成功: {msg}", p_ok)
             else:
-                p_fail = str(OUTPUT_DIR / "final_fail_status.png")
+                p_fail = str(OUTPUT_DIR / "flow_fail.png")
                 sb.save_screenshot(p_fail)
-                notify(False, "POST 请求未触发成功页面，请检查截图", p_fail)
+                notify(False, "流程执行完毕，但未见成功标识，请检查截图", p_fail)
 
         except Exception as e:
-            notify(False, f"程序运行异常: {str(e)}")
+            p_err = str(OUTPUT_DIR / "flow_error.png")
+            try: sb.save_screenshot(p_err)
+            except: pass
+            notify(False, f"程序运行异常: {str(e)}", p_err)
 
     if display: display.stop()
 
