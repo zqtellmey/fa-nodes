@@ -125,8 +125,9 @@ def main():
             sb.execute_script('document.getElementById("watchAdBtn").click();')
             print("[INFO] 最终按钮已点击，开始 30s 广告等待...")
 
-            # 等待 30 秒广告
-            for i in range(1, 4):
+            # 等待 40 秒广告
+            # range(1, 5) 会执行 4 次循环：10s, 20s, 30s, 40s
+            for i in range(1, 5):
                 time.sleep(10)
                 print(f"Waiting... {i*10}s elapsed.")
 
