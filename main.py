@@ -14,14 +14,10 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # --- 2. 工具函数 ---
 def notify(ok: bool, msg: str, img_path: str = None):
-    if not TG_BOT_TOKEN or not TG_CHAT_ID: 
-        print("[WARN] 缺少 TG 配置，跳过通知")
-        return
-        
+    if not TG_BOT_TOKEN or not TG_CHAT_ID: return
     now = (datetime.now(timezone(timedelta(hours=8)))).strftime("%Y-%m-%d %H:%M:%S")
     status_icon = "✅" if ok else "❌"
     text = f"🔔 FalixNodes: {status_icon}\n内容: {msg}\n时间: {now}"
-    
     try:
         requests.post(f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage", json={"chat_id": TG_CHAT_ID, "text": text}, timeout=10)
         if img_path and Path(img_path).exists():
@@ -80,7 +76,7 @@ def main():
                     success_loaded = True
                     break
                 except:
-                    print(f"[WARN] 第 {attempt + 1} 次尝试失败，正在刷新重试...")
+                    print(f"[WARN] 第 {attempt + 1} 次尝试失败，刷新重试...")
                     sb.refresh()
                     time.sleep(3)
 
@@ -90,39 +86,47 @@ def main():
                 notify(False, "无法越过 Cloudflare 验证", error_img)
                 return
 
-            # 填写 IP 并启动
+            # 填写 IP 并点击第一个启动按钮
             sb.type("#IP", SERVER_IP)
             sb.scroll_to('button.btn-start')
             sb.click('button.btn-start')
             
-            # 处理二次确认
+            # 确认弹窗
             time.sleep(5)
             handle_privacy_modal(sb)
-            
             sb.wait_for_element_visible("#watchAdBtn", timeout=20)
+            
+            # 点击 watchAdBtn (开始看广告)
             sb.execute_script('document.getElementById("watchAdBtn").click();')
-            print("[INFO] 最终按钮已点击，开始 40s 等待结果反馈...")
+            print("[INFO] 最终按钮已点击，等待 40s 广告结束并自动跳转...")
 
-            # 等待 40 秒
+            # 原地等待 40 秒，让网页自动完成“打开广告 -> 运行广告 -> 关闭广告 -> 跳回主页”的过程
             for i in range(1, 5):
                 time.sleep(10)
                 print(f"Waiting... {i*10}s elapsed.")
 
-            # --- 核心改进：通过成功提示元素判断 ---
+            # --- 关键：确保检测焦点在主页面 ---
+            try:
+                # 即使它会自动跳转，强制将焦点切回第一个句柄可以防止 Selenium “迷路”
+                sb.driver.switch_to.window(sb.driver.window_handles[0])
+            except:
+                pass
+
+            # --- 最终结果判断 ---
             success_selector = '#success-alert'
             if sb.is_element_visible(success_selector):
-                # 获取具体的成功文本（包含服务器名）
                 success_text = sb.get_text("#success-msg")
-                print(f"[SUCCESS] 检测到成功标识: {success_text}")
+                print(f"[SUCCESS] {success_text}")
                 
                 success_img = str(OUTPUT_DIR / "success.png")
                 sb.save_screenshot(success_img)
                 notify(True, f"续期成功: {success_text}", success_img)
             else:
+                # 如果没看到提示，截取当前页面分析原因
                 print("[ERROR] 40s 后未检测到成功标识元素")
                 fail_img = str(OUTPUT_DIR / "fail_no_confirm.png")
                 sb.save_screenshot(fail_img)
-                notify(False, "按钮已点击但未检测到成功提示，可能启动失败", fail_img)
+                notify(False, "广告结束后未检测到成功提示，可能是启动频率过高或页面未正确跳转", fail_img)
 
         except Exception as e:
             error_img = str(OUTPUT_DIR / "exception.png")
