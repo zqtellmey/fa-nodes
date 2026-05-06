@@ -1,4 +1,4 @@
-name: FalixNodes Auto Renew
+name: F-Nodes
 
 on:
   workflow_dispatch:
