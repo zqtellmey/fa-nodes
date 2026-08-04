@@ -21,53 +21,8 @@ jobs:
       cancel-in-progress: false
 
     steps:
-      # 1. 检出仓库
       - uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
 
-      # 2. 5分钟时间硬核校验
-      - name: 5分钟间隔检查
-        run: |
-          TIME_FILE="time.txt"
-          NOW=$(date +%s)
-          
-          if [ -f "$TIME_FILE" ]; then
-            LAST_TIME_STR=$(cat "$TIME_FILE" | xargs)
-            if [ -n "$LAST_TIME_STR" ]; then
-              LAST_TIME=$(date -d "$LAST_TIME_STR" +%s 2>/dev/null || echo 0)
-              DIFF=$((NOW - LAST_TIME))
-              
-              echo "[DEBUG] 读取到的 time.txt 内容: '$LAST_TIME_STR'"
-              echo "[DEBUG] 当前系统时间戳: $NOW"
-              echo "[DEBUG] 上次运行时间戳: $LAST_TIME"
-              echo "[DEBUG] 距离上次运行过去了: ${DIFF} 秒"
-              
-              if [ $DIFF -lt 300 ]; then
-                echo "❌【硬核拦截】距离上次运行仅过去 ${DIFF} 秒（不足 300 秒/5分钟），直接打断退出！"
-                exit 1  # 强制终止整个 Action
-              fi
-            fi
-          fi
-          echo "✅ 符合 5 分钟运行条件，允许继续执行..."
-
-      # 3. 【核心修复】立刻更新并“强行推送” time.txt，防止提交被 Reject
-      - name: 立刻锁定并保存当前运行时间
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          
-          # 写入最新 UTC 时间
-          date -u +"%Y-%m-%dT%H:%M:%SZ" > time.txt
-          echo "最新运行时间已更新为: $(cat time.txt)"
-
-          # 强制提交并 Push，确保 100% 成功写入 GitHub 仓库
-          git add time.txt
-          git commit -m "update: run timestamp [skip ci]" || echo "No changes to commit"
-          git push origin main --force
-
-      # 4. 锁死时间后再开始搭建环境与安装依赖
       - name: 设置 Python
         uses: actions/setup-python@v5
         with:
@@ -85,12 +40,21 @@ jobs:
           stack: dual
           mode: client
 
-      # 5. 执行 Python 主任务
       - name: 执行续期任务
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
           FALIX_SERVER_IP: ${{ secrets.FALIX_SERVER_IP }}
         run: |
-          mkdir -p output/screenshots
+         # mkdir -p output/screenshots
           python main.py
+
+      # 运行完毕后推送更新（如 main.py 修改或写出了 time.txt）
+    #  - name: 保存仓库变更 (包含 time.txt)
+    #    if: always()
+    #    run: |
+    #      git config --global user.name "github-actions[bot]"
+    #      git config --global user.email "github-actions[bot]@users.noreply.github.com"
+    #      git add time.txt || true
+    #      git commit -m "update: sync time.txt [skip ci]" || echo "No changes to commit"
+    #      git push origin main --force || true
