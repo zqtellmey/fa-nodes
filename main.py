@@ -6,14 +6,13 @@ from seleniumbase import SB
 # --- 1. 配置加载 ---
 TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN")
 TG_CHAT_ID = os.environ.get("TG_CHAT_ID")
-# 自动获取或手动设置 IP
 SERVER_IP = os.environ.get("FALIX_SERVER_IP") or "yaho.falixsrv.me"
 
 TARGET_URL = "https://falixnodes.net/startserver"
 OUTPUT_DIR = Path("output/screenshots")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-# --- 2. 工具函数 (修正了 TG 图片上传逻辑) ---
+# --- 2. 工具函数 ---
 def notify(ok: bool, msg: str, img_path: str = None):
     if not TG_BOT_TOKEN or not TG_CHAT_ID: 
         print(f"[DEBUG] {msg}")
@@ -22,7 +21,6 @@ def notify(ok: bool, msg: str, img_path: str = None):
     status_icon = "✅" if ok else "❌"
     text = f"🔔 FalixNodes: {status_icon}\n内容: {msg}\n时间: {now}"
     
-    # 1. 优先发送带有文字说明的图片
     if img_path and Path(img_path).exists():
         try:
             with open(img_path, "rb") as f:
@@ -33,13 +31,12 @@ def notify(ok: bool, msg: str, img_path: str = None):
                     timeout=20
                 )
                 if res.status_code == 200:
-                    return # 图片和文字一起发送成功，直接返回
+                    return
                 else:
                     print(f"[ERROR] TG 发送图片失败, 状态码: {res.status_code}, 响应: {res.text}")
         except Exception as e:
             print(f"[ERROR] TG 上传图片异常: {e}")
             
-    # 2. 如果无图片或图片发送失败，回退到纯文字通知
     try:
         requests.post(
             f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage",
@@ -49,7 +46,22 @@ def notify(ok: bool, msg: str, img_path: str = None):
     except Exception as e:
         print(f"[ERROR] TG 发送纯文字失败: {e}")
 
-# --- 3. 主程序逻辑 (核心业务代码一个字未修改) ---
+# --- 去广告函数 (根据要求抽取，随时可调用) ---
+def remove_ads(sb):
+    """移除覆盖在页面上的 ad_position_box 广告层"""
+    try:
+        ad_script = """
+        var adBox = document.getElementById('ad_position_box');
+        if (adBox) {
+            adBox.remove();
+            console.log('Removed #ad_position_box');
+        }
+        """
+        sb.execute_script(ad_script)
+    except Exception as e:
+        print(f"[DEBUG] 尝试去广告时出现小忽略项: {e}")
+
+# --- 3. 主程序逻辑 ---
 def main():
     display = None
     if platform.system().lower() == "linux":
@@ -65,47 +77,89 @@ def main():
             # 步骤 1: 打开网站
             sb.uc_open_with_reconnect(TARGET_URL, reconnect_time=5.0)
             time.sleep(3)
-            # 步骤 1 截图通知
+            remove_ads(sb)  # 交互前去广告
+            
             img_step1 = str(OUTPUT_DIR / "step1_open_url.png")
             sb.save_screenshot(img_step1)
             notify(True, "步骤 1 完成: 已打开网站", img_step1)
             
             # 步骤 2: 输入要启动的服务器地址
+            remove_ads(sb)  # 交互前去广告
             sb.wait_for_element_present("#IP", timeout=15)
             sb.type("#IP", SERVER_IP)
             print(f"[INFO] 已输入 IP: {SERVER_IP}")
-            # 步骤 2 截图通知
+            
             img_step2 = str(OUTPUT_DIR / "step2_input_ip.png")
             sb.save_screenshot(img_step2)
             notify(True, f"步骤 2 完成: 已输入 IP ({SERVER_IP})", img_step2)
 
-            # 步骤 3: 打上 CF 的验证勾
-            # SeleniumBase UC 模式会自动处理简单的 CF 验证
-            # 如果存在显式的验证框，尝试点击它
-            if sb.is_element_visible('input[name="cf-turnstile-response"]'):
-                print("[INFO] 正在处理 CF 验证勾...")
+            # 步骤 3: 针对 Turnstile iframe 进行精确的 CF 验证勾选与状态判断
+            remove_ads(sb)  # 交互前去广告
+            print("[INFO] 正在寻找并处理 CF Turnstile iframe 验证码...")
+            
+            # 定位含有 challenges.cloudflare.com 的 iframe
+            iframe_selector = 'iframe[src*="challenges.cloudflare.com"]'
+            
+            if sb.is_element_present(iframe_selector):
+                try:
+                    # 1. 切换到 Cloudflare 的 iframe 内部
+                    sb.switch_to_frame(iframe_selector)
+                    time.sleep(1)
+                    
+                    # 2. 点击 iframe 内部的复选框 (通常是 input 或 label)
+                    if sb.is_element_present('input[type="checkbox"]'):
+                        sb.click('input[type="checkbox"]')
+                    else:
+                        sb.click('body') # 如果找不到具体 checkbox，点击 body 触发
+                        
+                    print("[INFO] 已在 iframe 内触发点击，等待验证结果...")
+                    
+                    # 3. 循环等待判断是否出现“成功”或“Success”文本 (匹配中英文)
+                    verified = False
+                    for _ in range(10):  # 最多等待 10 秒
+                        time.sleep(1)
+                        # 检查 iframe 内是否有包含 成功/Success/Successful 文本的 span 标签
+                        page_text = sb.get_page_source()
+                        if any(term in page_text for term in ["成功", "Success", "Successful"]):
+                            verified = True
+                            print("[INFO] CF 验证成功！已检测到成功标识 span。")
+                            break
+                    
+                    if not verified:
+                        print("[WARNING] 未在规定时间内检测到验证成功的文本标识，继续尝试主流程...")
+                        
+                except Exception as cf_err:
+                    print(f"[ERROR] 处理 iframe 内 CF 验证时出错: {cf_err}")
+                finally:
+                    # 必须切回主文档，否则后续找不到主页面的元素！
+                    sb.switch_to_default_content()
+            else:
+                # 备用方案：若未抓到特定 iframe，尝试 SeleniumBase 自带的 GUI 绕过
+                print("[INFO] 未找到特定 iframe，调用 uc_gui_click_captcha 尝试自动绕过...")
                 sb.uc_gui_click_captcha()
-                time.sleep(4)
-            # 步骤 3 截图通知
+
+            time.sleep(3)
+            remove_ads(sb)
             img_step3 = str(OUTPUT_DIR / "step3_cf_turnstile.png")
             sb.save_screenshot(img_step3)
             notify(True, "步骤 3 完成: CF 验证处理完毕", img_step3)
 
             # 步骤 4: 点击第一个按钮 (Start Server)
-            # 根据页面逻辑，通常先点这个才会弹出 watchAdBtn
+            remove_ads(sb)  # 交互前去广告
             sb.click('button.btn-start') 
             print("[INFO] 已点击第一个按钮 (Start Server)")
             time.sleep(3)
-            # 步骤 4 截图通知
+            
             img_step4 = str(OUTPUT_DIR / "step4_click_start_btn.png")
             sb.save_screenshot(img_step4)
             notify(True, "步骤 4 完成: 已点击第一个按钮 (Start Server)", img_step4)
 
             # 步骤 5: 点击第二个按钮 (watchAdBtn)
+            remove_ads(sb)  # 交互前去广告
             sb.wait_for_element_visible("#watchAdBtn", timeout=15)
             sb.execute_script('document.getElementById("watchAdBtn").click();')
             print("[INFO] 已点击第二个按钮 (watchAdBtn)，广告计时开始...")
-            # 步骤 5 截图通知
+            
             img_step5 = str(OUTPUT_DIR / "step5_click_watch_ad_btn.png")
             sb.save_screenshot(img_step5)
             notify(True, "步骤 5 完成: 已点击第二个按钮 (watchAdBtn)", img_step5)
@@ -114,13 +168,12 @@ def main():
             for i in range(1, 6):
                 time.sleep(9)
                 print(f"广告进度模拟: {i*20}%...")
-            # 步骤 6 截图通知
+                
             img_step6 = str(OUTPUT_DIR / "step6_ad_finished.png")
             sb.save_screenshot(img_step6)
             notify(True, "步骤 6 完成: 45秒广告模拟等待结束", img_step6)
 
             # 步骤 7: POST 这个 START 的请求
-            # 此时后端已经记录了该 Session 完成了看广告动作
             print("[INFO] 广告模拟结束，正在发送最终 POST 请求...")
             post_script = f"""
             fetch('/startserver', {{
