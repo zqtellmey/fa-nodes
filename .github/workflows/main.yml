@@ -27,14 +27,7 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      # 2. 强制同步远端最新状态
-      - name: 强制同步远端最新状态
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git pull origin main --rebase || true
-
-      # 3. 5分钟时间硬核校验
+      # 2. 5分钟时间硬核校验
       - name: 5分钟间隔检查
         run: |
           TIME_FILE="time.txt"
@@ -59,17 +52,22 @@ jobs:
           fi
           echo "✅ 符合 5 分钟运行条件，允许继续执行..."
 
-      # 4. 【核心改动】校验通过后，立刻更新 time.txt 并提交锁死时间！
+      # 3. 【核心修复】立刻更新并“强行推送” time.txt，防止提交被 Reject
       - name: 立刻锁定并保存当前运行时间
         run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # 写入最新 UTC 时间
           date -u +"%Y-%m-%dT%H:%M:%SZ" > time.txt
-          echo "最新运行时间已立刻锁定为: $(cat time.txt)"
+          echo "最新运行时间已更新为: $(cat time.txt)"
 
+          # 强制提交并 Push，确保 100% 成功写入 GitHub 仓库
           git add time.txt
           git commit -m "update: run timestamp [skip ci]" || echo "No changes to commit"
-          git push origin main
+          git push origin main --force
 
-      # 5. 锁死时间后再开始搭建环境与安装依赖
+      # 4. 锁死时间后再开始搭建环境与安装依赖
       - name: 设置 Python
         uses: actions/setup-python@v5
         with:
@@ -87,7 +85,7 @@ jobs:
           stack: dual
           mode: client
 
-      # 6. 执行 Python 主任务
+      # 5. 执行 Python 主任务
       - name: 执行续期任务
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
