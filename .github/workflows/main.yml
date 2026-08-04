@@ -155,6 +155,6 @@ jobs:
           mkdir -p output/screenshots
           python main.py
 
-      - name: 清理
-        if: always()
-        run: rm -rf output/screenshots/*.png
+    #  - name: 清理
+    #    if: always()
+    #    run: rm -rf output/screenshots/*.png
