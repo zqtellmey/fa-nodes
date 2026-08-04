@@ -21,13 +21,20 @@ jobs:
       cancel-in-progress: false
 
     steps:
-      # 1. 强制拉取 main 分支的最新提交，防止远程调用拿到旧缓存
+      # 1. 检出仓库
       - uses: actions/checkout@v4
         with:
           ref: main
-          fetch-depth: 1
+          fetch-depth: 0  # 拉取完整提交历史，防止脱节
 
-      # 2. 时间校验，不足 5 分钟直接 exit 1 报错打断
+      # 2. 【核心修复】强行拉取 GitHub 远端最新 Commit 上的 time.txt
+      - name: 强制同步远端最新状态
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git pull origin main --rebase || true
+
+      # 3. 5分钟时间硬核校验
       - name: 5分钟间隔检查
         run: |
           TIME_FILE="time.txt"
@@ -39,16 +46,18 @@ jobs:
               LAST_TIME=$(date -d "$LAST_TIME_STR" +%s 2>/dev/null || echo 0)
               DIFF=$((NOW - LAST_TIME))
               
-              echo "上次运行时间: $LAST_TIME_STR"
-              echo "距离上次运行过去了: ${DIFF} 秒"
+              echo "[DEBUG] 读取到的 time.txt 内容: '$LAST_TIME_STR'"
+              echo "[DEBUG] 当前系统时间戳: $NOW"
+              echo "[DEBUG] 上次运行时间戳: $LAST_TIME"
+              echo "[DEBUG] 距离上次运行过去了: ${DIFF} 秒"
               
               if [ $DIFF -lt 300 ]; then
-                echo "❌ 距离上次运行不足 5 分钟（需等待 $((300 - DIFF)) 秒），强行终止任务！"
-                exit 1  # 关键：直接强行终止，后续所有步骤都不再执行
+                echo "❌【硬核拦截】距离上次运行仅过去 ${DIFF} 秒（不足 300 秒/5分钟），直接打断退出！"
+                exit 1  # 强制终止整个 Action
               fi
             fi
           fi
-          echo "符合运行条件，继续执行..."
+          echo "✅ 符合 5 分钟运行条件，允许继续执行..."
 
       - name: 设置 Python
         uses: actions/setup-python@v5
@@ -76,15 +85,13 @@ jobs:
           mkdir -p output/screenshots
           python main.py
 
-      # 3. 运行成功后写入最新 ISO UTC 时间并提交
+      # 4. 运行成功后写入最新 ISO UTC 时间并强制推送到仓库
       - name: 记录并保存最新运行时间
         if: success()
         run: |
           date -u +"%Y-%m-%dT%H:%M:%SZ" > time.txt
           echo "最新运行时间已更新为: $(cat time.txt)"
 
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add time.txt
           git commit -m "update: run timestamp [skip ci]" || echo "No changes to commit"
-          git push
+          git push origin main
