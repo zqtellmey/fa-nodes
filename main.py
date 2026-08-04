@@ -11,6 +11,7 @@ SERVER_IP = os.environ.get("FALIX_SERVER_IP") or "yaho.falixsrv.me"
 TARGET_URL = "https://falixnodes.net/startserver"
 OUTPUT_DIR = Path("output/screenshots")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+TIME_FILE = Path("time.txt")  # 运行时间记录文件
 
 # --- 2. 工具函数 ---
 def notify(ok: bool, msg: str, img_path: str = None):
@@ -72,8 +73,36 @@ def check_and_finish(sb, step_name: str) -> bool:
         return True
     return False
 
+# --- 更新运行时间记录 ---
+def update_last_run_time():
+    """将当前时间记录写入 time.txt"""
+    try:
+        now_str = datetime.now(timezone.utc).isoformat()
+        with open(TIME_FILE, "w", encoding="utf-8") as f:
+            f.write(now_str)
+        print(f"[INFO] 运行时间已更新至 {TIME_FILE}")
+    except Exception as e:
+        print(f"[ERROR] 更新 {TIME_FILE} 失败: {e}")
+
 # --- 3. 主程序逻辑 ---
 def main():
+    # === 5分钟运行间隔校验 ===
+    if TIME_FILE.exists():
+        try:
+            with open(TIME_FILE, "r", encoding="utf-8") as f:
+                last_time_str = f.read().strip()
+            if last_time_str:
+                last_time = datetime.fromisoformat(last_time_str)
+                now_time = datetime.now(timezone.utc)
+                diff_seconds = (now_time - last_time).total_seconds()
+                
+                if diff_seconds < 300:  # 5分钟 = 300秒
+                    wait_remaining = int(300 - diff_seconds)
+                    print(f"[INFO] 距离上一次运行仅过去 {int(diff_seconds)} 秒（不足 5 分钟），还需等待 {wait_remaining} 秒。终止本次运行。")
+                    return
+        except Exception as e:
+            print(f"[WARNING] 读取或解析 {TIME_FILE} 失败: {e}，将直接继续运行...")
+
     display = None
     if platform.system().lower() == "linux":
         from pyvirtualdisplay import Display
@@ -95,6 +124,7 @@ def main():
             notify(True, "步骤 1 完成: 已打开网站", img_step1)
             
             if check_and_finish(sb, "步骤 1"):
+                update_last_run_time()
                 if display: display.stop()
                 return
 
@@ -109,6 +139,7 @@ def main():
             notify(True, f"步骤 2 完成: 已输入 IP ({SERVER_IP})", img_step2)
 
             if check_and_finish(sb, "步骤 2"):
+                update_last_run_time()
                 if display: display.stop()
                 return
 
@@ -157,6 +188,7 @@ def main():
             notify(True, "步骤 3 完成: CF 验证处理完毕", img_step3)
 
             if check_and_finish(sb, "步骤 3"):
+                update_last_run_time()
                 if display: display.stop()
                 return
 
@@ -171,6 +203,7 @@ def main():
             notify(True, "步骤 4 完成: 已点击第一个按钮 (Start Server)", img_step4)
 
             if check_and_finish(sb, "步骤 4"):
+                update_last_run_time()
                 if display: display.stop()
                 return
 
@@ -185,6 +218,7 @@ def main():
             notify(True, "步骤 5 完成: 已点击第二个按钮 (watchAdBtn)", img_step5)
 
             if check_and_finish(sb, "步骤 5"):
+                update_last_run_time()
                 if display: display.stop()
                 return
 
@@ -198,6 +232,7 @@ def main():
             notify(True, "步骤 6 完成: 45秒广告模拟等待结束", img_step6)
 
             if check_and_finish(sb, "步骤 6"):
+                update_last_run_time()
                 if display: display.stop()
                 return
 
@@ -235,6 +270,9 @@ def main():
             try: sb.save_screenshot(p_err)
             except: pass
             notify(False, f"程序运行异常: {str(e)}", p_err)
+        finally:
+            # 无论成功还是结束流程，只要执行了主自动化流程，均在退出前刷新 time.txt
+            update_last_run_time()
 
     if display: display.stop()
 
