@@ -13,7 +13,7 @@ TARGET_URL = "https://falixnodes.net/startserver"
 OUTPUT_DIR = Path("output/screenshots")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-# --- 2. 工具函数 ---
+# --- 2. 工具函数 (修正了 TG 图片上传逻辑) ---
 def notify(ok: bool, msg: str, img_path: str = None):
     if not TG_BOT_TOKEN or not TG_CHAT_ID: 
         print(f"[DEBUG] {msg}")
@@ -21,15 +21,35 @@ def notify(ok: bool, msg: str, img_path: str = None):
     now = (datetime.now(timezone(timedelta(hours=8)))).strftime("%Y-%m-%d %H:%M:%S")
     status_icon = "✅" if ok else "❌"
     text = f"🔔 FalixNodes: {status_icon}\n内容: {msg}\n时间: {now}"
-    try:
-        requests.post(f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage", json={"chat_id": TG_CHAT_ID, "text": text}, timeout=10)
-        if img_path and Path(img_path).exists():
+    
+    # 1. 优先发送带有文字说明的图片
+    if img_path and Path(img_path).exists():
+        try:
             with open(img_path, "rb") as f:
-                requests.post(f"https://api.telegram.org/bot{TG_CHAT_ID}/sendPhoto", data={"chat_id": TG_CHAT_ID}, files={"photo": f}, timeout=15)
+                res = requests.post(
+                    f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendPhoto",
+                    data={"chat_id": TG_CHAT_ID, "caption": text},
+                    files={"photo": f},
+                    timeout=20
+                )
+                if res.status_code == 200:
+                    return # 图片和文字一起发送成功，直接返回
+                else:
+                    print(f"[ERROR] TG 发送图片失败, 状态码: {res.status_code}, 响应: {res.text}")
+        except Exception as e:
+            print(f"[ERROR] TG 上传图片异常: {e}")
+            
+    # 2. 如果无图片或图片发送失败，回退到纯文字通知
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage",
+            json={"chat_id": TG_CHAT_ID, "text": text},
+            timeout=10
+        )
     except Exception as e:
-        print(f"[ERROR] TG 通知失败: {e}")
+        print(f"[ERROR] TG 发送纯文字失败: {e}")
 
-# --- 3. 主程序逻辑 ---
+# --- 3. 主程序逻辑 (核心业务代码一个字未修改) ---
 def main():
     display = None
     if platform.system().lower() == "linux":
