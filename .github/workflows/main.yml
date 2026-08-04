@@ -40,7 +40,6 @@ jobs:
               
               if [ $DIFF -lt 300 ]; then
                 echo "⏰ 距离上次运行不足 5 分钟（需等待 $((300 - DIFF)) 秒），直接终止后续运行！"
-                # 设置标志量为 true 供后续步骤判断 skip
                 echo "skip=true" >> $GITHUB_OUTPUT
                 exit 0
               fi
@@ -79,15 +78,17 @@ jobs:
           mkdir -p output/screenshots
           python main.py
 
-      - name: 自动保存并推送 time.txt
+      # === 运行完成后写入时间并提交 ===
+      - name: 记录并保存最新运行时间
         if: steps.time_check.outputs.skip != 'true'
         run: |
+          # 1. 写入当前 ISO 8601 格式的 UTC 时间到 time.txt
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > time.txt
+          echo "最新运行时间已更新为: $(cat time.txt)"
+
+          # 2. 提交更改并推送到 GitHub 仓库
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add time.txt
-          git commit -m "update: run timestamp" || echo "No changes to commit"
+          git commit -m "update: run timestamp [skip ci]" || echo "No changes to commit"
           git push
-
-    #  - name: 清理
-    #    if: always()
-    #    run: rm -rf output/screenshots/*.png
