@@ -46,7 +46,7 @@ def notify(ok: bool, msg: str, img_path: str = None):
     except Exception as e:
         print(f"[ERROR] TG 发送纯文字失败: {e}")
 
-# --- 去广告函数 (根据要求抽取，随时可调用) ---
+# --- 去广告函数 ---
 def remove_ads(sb):
     """移除覆盖在页面上的 ad_position_box 广告层"""
     try:
@@ -60,6 +60,17 @@ def remove_ads(sb):
         sb.execute_script(ad_script)
     except Exception as e:
         print(f"[DEBUG] 尝试去广告时出现小忽略项: {e}")
+
+# --- 成功标识检查函数 ---
+def check_and_finish(sb, step_name: str) -> bool:
+    """检查网页是否已出现成功标识，若成功则截图通知并返回 True"""
+    if sb.is_element_visible('#success-alert'):
+        msg = sb.get_text("#success-msg")
+        p_ok = str(OUTPUT_DIR / f"success_at_{step_name}.png")
+        sb.save_screenshot(p_ok)
+        notify(True, f"在【{step_name}】检测到成功标识: {msg}", p_ok)
+        return True
+    return False
 
 # --- 3. 主程序逻辑 ---
 def main():
@@ -77,14 +88,18 @@ def main():
             # 步骤 1: 打开网站
             sb.uc_open_with_reconnect(TARGET_URL, reconnect_time=5.0)
             time.sleep(3)
-            remove_ads(sb)  # 交互前去广告
+            remove_ads(sb)
             
             img_step1 = str(OUTPUT_DIR / "step1_open_url.png")
             sb.save_screenshot(img_step1)
             notify(True, "步骤 1 完成: 已打开网站", img_step1)
             
+            if check_and_finish(sb, "步骤 1"):
+                if display: display.stop()
+                return
+
             # 步骤 2: 输入要启动的服务器地址
-            remove_ads(sb)  # 交互前去广告
+            remove_ads(sb)
             sb.wait_for_element_present("#IP", timeout=15)
             sb.type("#IP", SERVER_IP)
             print(f"[INFO] 已输入 IP: {SERVER_IP}")
@@ -93,32 +108,31 @@ def main():
             sb.save_screenshot(img_step2)
             notify(True, f"步骤 2 完成: 已输入 IP ({SERVER_IP})", img_step2)
 
+            if check_and_finish(sb, "步骤 2"):
+                if display: display.stop()
+                return
+
             # 步骤 3: 针对 Turnstile iframe 进行精确的 CF 验证勾选与状态判断
-            remove_ads(sb)  # 交互前去广告
+            remove_ads(sb)
             print("[INFO] 正在寻找并处理 CF Turnstile iframe 验证码...")
             
-            # 定位含有 challenges.cloudflare.com 的 iframe
             iframe_selector = 'iframe[src*="challenges.cloudflare.com"]'
             
             if sb.is_element_present(iframe_selector):
                 try:
-                    # 1. 切换到 Cloudflare 的 iframe 内部
                     sb.switch_to_frame(iframe_selector)
                     time.sleep(1)
                     
-                    # 2. 点击 iframe 内部的复选框 (通常是 input 或 label)
                     if sb.is_element_present('input[type="checkbox"]'):
                         sb.click('input[type="checkbox"]')
                     else:
-                        sb.click('body') # 如果找不到具体 checkbox，点击 body 触发
+                        sb.click('body')
                         
                     print("[INFO] 已在 iframe 内触发点击，等待验证结果...")
                     
-                    # 3. 循环等待判断是否出现“成功”或“Success”文本 (匹配中英文)
                     verified = False
-                    for _ in range(10):  # 最多等待 10 秒
+                    for _ in range(10):
                         time.sleep(1)
-                        # 检查 iframe 内是否有包含 成功/Success/Successful 文本的 span 标签
                         page_text = sb.get_page_source()
                         if any(term in page_text for term in ["成功", "Success", "Successful"]):
                             verified = True
@@ -131,10 +145,8 @@ def main():
                 except Exception as cf_err:
                     print(f"[ERROR] 处理 iframe 内 CF 验证时出错: {cf_err}")
                 finally:
-                    # 必须切回主文档，否则后续找不到主页面的元素！
                     sb.switch_to_default_content()
             else:
-                # 备用方案：若未抓到特定 iframe，尝试 SeleniumBase 自带的 GUI 绕过
                 print("[INFO] 未找到特定 iframe，调用 uc_gui_click_captcha 尝试自动绕过...")
                 sb.uc_gui_click_captcha()
 
@@ -144,8 +156,12 @@ def main():
             sb.save_screenshot(img_step3)
             notify(True, "步骤 3 完成: CF 验证处理完毕", img_step3)
 
+            if check_and_finish(sb, "步骤 3"):
+                if display: display.stop()
+                return
+
             # 步骤 4: 点击第一个按钮 (Start Server)
-            remove_ads(sb)  # 交互前去广告
+            remove_ads(sb)
             sb.click('button.btn-start') 
             print("[INFO] 已点击第一个按钮 (Start Server)")
             time.sleep(3)
@@ -154,8 +170,12 @@ def main():
             sb.save_screenshot(img_step4)
             notify(True, "步骤 4 完成: 已点击第一个按钮 (Start Server)", img_step4)
 
+            if check_and_finish(sb, "步骤 4"):
+                if display: display.stop()
+                return
+
             # 步骤 5: 点击第二个按钮 (watchAdBtn)
-            remove_ads(sb)  # 交互前去广告
+            remove_ads(sb)
             sb.wait_for_element_visible("#watchAdBtn", timeout=15)
             sb.execute_script('document.getElementById("watchAdBtn").click();')
             print("[INFO] 已点击第二个按钮 (watchAdBtn)，广告计时开始...")
@@ -163,6 +183,10 @@ def main():
             img_step5 = str(OUTPUT_DIR / "step5_click_watch_ad_btn.png")
             sb.save_screenshot(img_step5)
             notify(True, "步骤 5 完成: 已点击第二个按钮 (watchAdBtn)", img_step5)
+
+            if check_and_finish(sb, "步骤 5"):
+                if display: display.stop()
+                return
 
             # 步骤 6: 等广告看完 (模拟等待 45 秒)
             for i in range(1, 6):
@@ -172,6 +196,10 @@ def main():
             img_step6 = str(OUTPUT_DIR / "step6_ad_finished.png")
             sb.save_screenshot(img_step6)
             notify(True, "步骤 6 完成: 45秒广告模拟等待结束", img_step6)
+
+            if check_and_finish(sb, "步骤 6"):
+                if display: display.stop()
+                return
 
             # 步骤 7: POST 这个 START 的请求
             print("[INFO] 广告模拟结束，正在发送最终 POST 请求...")
@@ -194,15 +222,10 @@ def main():
             """
             sb.execute_script(post_script)
             
-            # 等待刷新并判定
+            # 等待刷新并做最终判定
             time.sleep(10)
             
-            if sb.is_element_visible('#success-alert'):
-                msg = sb.get_text("#success-msg")
-                p_ok = str(OUTPUT_DIR / "flow_success.png")
-                sb.save_screenshot(p_ok)
-                notify(True, f"完整流程成功: {msg}", p_ok)
-            else:
+            if not check_and_finish(sb, "步骤 7 (POST)"):
                 p_fail = str(OUTPUT_DIR / "flow_fail.png")
                 sb.save_screenshot(p_fail)
                 notify(False, "流程执行完毕，但未见成功标识，请检查截图", p_fail)
