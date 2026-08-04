@@ -21,10 +21,14 @@ jobs:
       cancel-in-progress: false
 
     steps:
+      # 1. 强制拉取 main 分支的最新提交，防止远程调用拿到旧缓存
       - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
 
+      # 2. 时间校验，不足 5 分钟直接 exit 1 报错打断
       - name: 5分钟间隔检查
-        id: time_check
         run: |
           TIME_FILE="time.txt"
           NOW=$(date +%s)
@@ -39,37 +43,31 @@ jobs:
               echo "距离上次运行过去了: ${DIFF} 秒"
               
               if [ $DIFF -lt 300 ]; then
-                echo "⏰ 距离上次运行不足 5 分钟（需等待 $((300 - DIFF)) 秒），直接终止后续运行！"
-                echo "skip=true" >> $GITHUB_OUTPUT
-                exit 0
+                echo "❌ 距离上次运行不足 5 分钟（需等待 $((300 - DIFF)) 秒），强行终止任务！"
+                exit 1  # 关键：直接强行终止，后续所有步骤都不再执行
               fi
             fi
           fi
           echo "符合运行条件，继续执行..."
-          echo "skip=false" >> $GITHUB_OUTPUT
 
       - name: 设置 Python
-        if: steps.time_check.outputs.skip != 'true'
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: 安装基础依赖
-        if: steps.time_check.outputs.skip != 'true'
         run: |
           sudo apt-get update && sudo apt-get install -y xvfb unzip jq
           pip install seleniumbase>=4.25.0 pyvirtualdisplay>=3.0 requests>=2.31.0
           sbase install chromedriver
 
       - name: 启用 WARP 网络
-        if: steps.time_check.outputs.skip != 'true'
         uses: fscarmen/warp-on-actions@v1.3
         with:
           stack: dual
           mode: client
 
       - name: 执行续期任务
-        if: steps.time_check.outputs.skip != 'true'
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
@@ -78,15 +76,13 @@ jobs:
           mkdir -p output/screenshots
           python main.py
 
-      # === 运行完成后写入时间并提交 ===
+      # 3. 运行成功后写入最新 ISO UTC 时间并提交
       - name: 记录并保存最新运行时间
-        if: steps.time_check.outputs.skip != 'true'
+        if: success()
         run: |
-          # 1. 写入当前 ISO 8601 格式的 UTC 时间到 time.txt
           date -u +"%Y-%m-%dT%H:%M:%SZ" > time.txt
           echo "最新运行时间已更新为: $(cat time.txt)"
 
-          # 2. 提交更改并推送到 GitHub 仓库
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add time.txt
