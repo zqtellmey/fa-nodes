@@ -6,7 +6,7 @@ from seleniumbase import SB
 # --- 1. 配置加载 ---
 TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN")
 TG_CHAT_ID = os.environ.get("TG_CHAT_ID")
-SERVER_IP = os.environ.get("FALIX_SERVER_IP") or "yaho.falixsrv.me"
+SERVER_IP = os.environ.get("FALIX_SERVER_IP") or "myaho.falixsrv.me"
 
 TARGET_URL = "https://falixnodes.net/startserver"
 OUTPUT_DIR = Path("output/screenshots")
